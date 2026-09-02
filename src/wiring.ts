@@ -69,7 +69,7 @@ import { createMemoryCronFireStore, createPostgresCronFireStore } from "./cron/c
 import { createDeliveryStore, type DeliveryStore } from "./delivery/delivery-store.ts";
 import { createPostgresDeliveryStore } from "./delivery/postgres-delivery-store.ts";
 import { wireRunResultDeliveries } from "./delivery/run-result-delivery.ts";
-import { createDirectoryStore, type DirectoryStore } from "./directory/directory-store.ts";
+import { createDirectoryStore, withEmailAuthMembers, type DirectoryStore } from "./directory/directory-store.ts";
 import { createPostgresDirectoryStore } from "./directory/postgres-directory-store.ts";
 import {
   createMemoryEnvironmentStore,
@@ -1015,7 +1015,10 @@ export function buildApp(
     onCaptureError: (e, scope) =>
       errors.record({ category: "memory", code: "capture_failed", message: errMessage(e), scopeLabel: scope }),
   });
-  const directory = config.databaseUrl ? createPostgresDirectoryStore(config.databaseUrl) : createDirectoryStore();
+  const directory = withEmailAuthMembers(
+    config.databaseUrl ? createPostgresDirectoryStore(config.databaseUrl) : createDirectoryStore(),
+    config.emailAuthPrincipals ?? [],
+  );
   const projects = createProjectStore(artifactMap<Project>("projects"), {
     isActiveMember: (principalId) => identity.isInternal(identity.classify(principalId)),
     advisoryLock,
@@ -1289,15 +1292,6 @@ export function buildApp(
     webhooks,
     deliveries,
     directory,
-    ...(config.emailAuthPrincipals?.length
-      ? {
-          emailAuthMembers: config.emailAuthPrincipals.map((principalId) => ({
-            principalId,
-            displayName: principalId,
-            type: "internal" as const,
-          })),
-        }
-      : {}),
     projects,
     environments,
     deploy: deployService,

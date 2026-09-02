@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createDirectoryStore, type DirectoryStore } from "../src/directory/directory-store.ts";
+import { createDirectoryStore, withEmailAuthMembers, type DirectoryStore } from "../src/directory/directory-store.ts";
 
 describe("directory resolution (agent → teammate addressing, §10)", () => {
   const dir = async (): Promise<DirectoryStore> => {
@@ -332,5 +332,52 @@ describe("private-channel membership (authorizes private-channel sends, §10)", 
     assert.equal(await d.channelMembership("C-connect", "U-member"), true);
     assert.equal(await d.channelMember("C-connect", "U-member"), false);
     assert.deepEqual(await d.listChannelsFor("U-member"), []);
+  });
+});
+
+describe("email-auth members stand in the directory beside the synced roster", () => {
+  const dir = async (): Promise<DirectoryStore> => {
+    const stored = createDirectoryStore();
+    await stored.replace([
+      { principalId: "U-alice", displayName: "Alice Example", type: "internal", slackId: "U-alice" },
+      { principalId: "shared@example.com", displayName: "Shared Person", type: "internal" },
+    ]);
+    return withEmailAuthMembers(stored, ["Web.Only@Example.com", "SHARED@example.com", "alice.web@example.com"]);
+  };
+
+  it("lists web-only people after the synced roster without duplicating a synced email", async () => {
+    const members = await (await dir()).list();
+    assert.deepEqual(
+      members.map((member) => member.principalId),
+      ["U-alice", "shared@example.com", "web.only@example.com", "alice.web@example.com"],
+    );
+    assert.equal(members.find((member) => member.principalId === "shared@example.com")?.displayName, "Shared Person");
+  });
+
+  it("gets a web-only person by email regardless of case, preferring the synced row", async () => {
+    const d = await dir();
+    assert.equal((await d.get("WEB.ONLY@example.com"))?.principalId, "web.only@example.com");
+    assert.equal((await d.get("shared@example.com"))?.displayName, "Shared Person");
+    assert.equal(await d.get("nobody@example.com"), null);
+  });
+
+  it("resolves a partial query against web-only people too", async () => {
+    const d = await dir();
+    const one = await d.resolve("web.only");
+    assert.equal(one.kind, "one");
+    if (one.kind === "one") assert.equal(one.member.principalId, "web.only@example.com");
+    const both = await d.resolve("alice");
+    assert.equal(both.kind, "ambiguous");
+    if (both.kind === "ambiguous")
+      assert.deepEqual(
+        both.candidates.map((member) => member.principalId),
+        ["U-alice", "alice.web@example.com"],
+      );
+    assert.equal((await d.resolve("zed")).kind, "none");
+  });
+
+  it("is a no-op wrapper when no email-auth people are configured", async () => {
+    const stored = createDirectoryStore();
+    assert.equal(withEmailAuthMembers(stored, []), stored);
   });
 });

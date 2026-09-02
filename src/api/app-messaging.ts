@@ -89,12 +89,6 @@ export function createMessagingMethods(
   const contextRequests = deps.contextRequests ?? createMemoryMap<SurfaceContextRequest>();
   const contextRequestListeners = new Set<(request: SurfaceContextRequest) => void>();
   const contextRequestTokens = new Map<string, string>();
-  const emailAuthMembers = deps.emailAuthMembers ?? [];
-  const mergedDirectoryMembers = async () => {
-    const stored = await deps.directory.list();
-    const seen = new Set(stored.map((member) => personKey(member.principalId)));
-    return [...stored, ...emailAuthMembers.filter((member) => !seen.has(personKey(member.principalId)))];
-  };
 
   return {
     async createCron(input) {
@@ -400,30 +394,20 @@ export function createMessagingMethods(
         ...(isPrivate !== undefined ? { isPrivate } : {}),
       });
     },
-    async resolveRecipient(query) {
-      const stored = await deps.directory.resolve(query);
-      if (stored.kind !== "none") return stored;
-      const key = personKey(query);
-      const member = emailAuthMembers.find(
-        (candidate) => personKey(candidate.principalId) === key || personKey(candidate.displayName) === key,
-      );
-      return member ? { kind: "one", member } : { kind: "none" };
+    resolveRecipient(query) {
+      return deps.directory.resolve(query);
     },
     resolveChannel(query) {
       return deps.directory.resolveChannel(query);
     },
     directoryMembers() {
-      return mergedDirectoryMembers();
+      return deps.directory.list();
     },
     directoryChannels() {
       return deps.directory.listChannels();
     },
-    async directoryMember(principalId) {
-      return (
-        (await deps.directory.get(principalId)) ??
-        emailAuthMembers.find((member) => personKey(member.principalId) === personKey(principalId)) ??
-        null
-      );
+    directoryMember(principalId) {
+      return deps.directory.get(principalId);
     },
     samePerson(a, b) {
       return samePersonInDirectory(deps.directory, a, b);

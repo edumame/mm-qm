@@ -1,5 +1,5 @@
 import type { PrincipalType } from "../types.ts";
-import { samePerson } from "./person.ts";
+import { personKey, samePerson } from "./person.ts";
 
 export interface DirectoryMember {
   principalId: string;
@@ -80,7 +80,7 @@ export const MAX_CANDIDATES = 10;
 export const normDirectoryQuery = (s: string): string => s.trim().toLowerCase().replace(/^[@#]/, "");
 
 function pickMatch<T>(
-  items: T[],
+  items: readonly T[],
   query: string,
   id: (t: T) => string,
   label: (t: T) => string,
@@ -97,6 +97,46 @@ function pickMatch<T>(
   if (pool.length === 0) return { kind: "none" };
   if (pool.length === 1) return { kind: "one", item: pool[0]! };
   return { kind: "ambiguous", items: pool.slice(0, MAX_CANDIDATES) };
+}
+
+function resolveMembers(members: readonly DirectoryMember[], query: string): RecipientResolution {
+  const bySlackId = members.find((x) => x.slackId && x.slackId === query.trim());
+  if (bySlackId) return { kind: "one", member: bySlackId };
+  const m = pickMatch(
+    members,
+    query,
+    (x) => x.principalId,
+    (x) => x.displayName,
+  );
+  if (m.kind === "one") return { kind: "one", member: m.item };
+  if (m.kind === "ambiguous") return { kind: "ambiguous", candidates: m.items };
+  return { kind: "none" };
+}
+
+export function withEmailAuthMembers(inner: DirectoryStore, principalIds: readonly string[]): DirectoryStore {
+  const standing: DirectoryMember[] = [...new Set(principalIds.map(personKey).filter(Boolean))].map((principalId) => ({
+    principalId,
+    displayName: principalId,
+    type: "internal",
+  }));
+  if (standing.length === 0) return inner;
+  const list = async (): Promise<DirectoryMember[]> => {
+    const stored = await inner.list();
+    const seen = new Set(stored.map((member) => personKey(member.principalId)));
+    return [...stored, ...standing.filter((member) => !seen.has(member.principalId))];
+  };
+  return {
+    ...inner,
+    list,
+    async get(principalId) {
+      return (
+        (await inner.get(principalId)) ?? standing.find((member) => samePerson(member.principalId, principalId)) ?? null
+      );
+    },
+    async resolve(query) {
+      return resolveMembers(await list(), query);
+    },
+  };
 }
 
 export function createDirectoryStore(): DirectoryStore {
@@ -273,17 +313,7 @@ export function createDirectoryStore(): DirectoryStore {
       return members.find((m) => samePerson(m.principalId, principalId)) ?? null;
     },
     async resolve(query) {
-      const bySlackId = members.find((x) => x.slackId && x.slackId === query.trim());
-      if (bySlackId) return { kind: "one", member: bySlackId };
-      const m = pickMatch(
-        members,
-        query,
-        (x) => x.principalId,
-        (x) => x.displayName,
-      );
-      if (m.kind === "one") return { kind: "one", member: m.item };
-      if (m.kind === "ambiguous") return { kind: "ambiguous", candidates: m.items };
-      return { kind: "none" };
+      return resolveMembers(members, query);
     },
     async resolveChannel(query) {
       const m = pickMatch(

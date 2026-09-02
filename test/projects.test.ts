@@ -1056,3 +1056,38 @@ test("Project slack-channel routes gate on visibility and workspace use, and syn
   assert.equal(await built.projects.membership(groupRef, "member"), true);
   assert.ok(!(await built.app.listSessions("chan-pal")).some((s) => s.scopeId === scope));
 });
+
+test("people who only sign in by email can be found and added to a project", async () => {
+  const built = buildApp(
+    testConfig({
+      dataDir: mkdtempSync(join(tmpdir(), "project-email-member-")),
+      emailAuthPrincipals: ["Web.Only@Example.com"],
+    }),
+  );
+  await built.app.upsertDirectory([
+    { principalId: "owner", displayName: "Owner", type: "internal" },
+    { principalId: "U-slack", displayName: "Web Slacker", type: "internal", slackId: "U-slack" },
+  ]);
+  const project = await built.app.createProject("owner", "Mixed");
+  assert.ok(project);
+
+  const search = await built.app.resolveRecipient("web");
+  assert.equal(search.kind, "ambiguous");
+  if (search.kind === "ambiguous")
+    assert.deepEqual(search.candidates.map((member) => member.principalId).sort(), ["U-slack", "web.only@example.com"]);
+
+  const added = await built.app.addProjectMember(project.id, "owner", "web.only@example.com");
+  assert.equal(added.status, "ok");
+  if (added.status === "ok") {
+    assert.ok(added.changed);
+    assert.deepEqual(
+      added.project.members.map((member) => member.principalId),
+      ["owner", "web.only@example.com"],
+    );
+  }
+  assert.equal((await built.app.listProjects("web.only@example.com")).map((p) => p.id).join(), project.id);
+  assert.equal(
+    (await built.app.addProjectMember(project.id, "owner", "stranger@example.com")).status,
+    "invalid_member",
+  );
+});

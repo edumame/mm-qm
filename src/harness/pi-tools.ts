@@ -1901,8 +1901,11 @@ export function createPiTools(ref: ToolContextRef, opts?: PiToolsOptions): ToolD
       "automatically), `verification` (how the request is authenticated), optional `filters` (skip the turn " +
       'unless the event matches — cheap pre-gating, e.g. [{path:"action",in:["opened"]}]), and optional ' +
       "`destinationKey` (same delivery menu as crons). verification.scheme is one of github | slack | " +
-      "stripe | hmac-sha256: for github/slack/stripe the USER gives you the signing secret from the " +
-      "sender's settings page; for hmac-sha256 generate a strong random secret yourself. A signing secret is always required.\n" +
+      "stripe | hmac-sha256 | bearer: for github/slack/stripe the USER gives you the signing secret from the " +
+      "sender's settings page; for hmac-sha256 (sender signs the body, X-Signature header) and bearer (sender " +
+      "passes the secret as `Authorization: Bearer <secret>` and should send an Idempotency-Key header so a retry " +
+      "doesn't fire twice — the fit for scripts, Zapier-style tools, and internal services that just need an API key) generate a " +
+      "strong random secret yourself (16+ characters for bearer). A secret is always required.\n" +
       "create returns the inbound `url` and `secret` ONCE. You CANNOT open the sender's settings page, so " +
       "relay BOTH to the user verbatim — the `url` is already the full public inbound URL (hand it over as-is) " +
       "and the `secret` — so they can point GitHub/Stripe/etc. at it. Until they do, it never fires.\n" +
@@ -1920,12 +1923,18 @@ export function createPiTools(ref: ToolContextRef, opts?: PiToolsOptions): ToolD
         Type.Object(
           {
             scheme: Type.Union(
-              [Type.Literal("github"), Type.Literal("slack"), Type.Literal("stripe"), Type.Literal("hmac-sha256")],
+              [
+                Type.Literal("github"),
+                Type.Literal("slack"),
+                Type.Literal("stripe"),
+                Type.Literal("hmac-sha256"),
+                Type.Literal("bearer"),
+              ],
               { description: "how the inbound request is authenticated." },
             ),
             secret: Type.String({
               description:
-                "the signing secret (from the sender for github/slack/stripe; self-generated for hmac-sha256).",
+                "the secret (from the sender for github/slack/stripe; self-generated for hmac-sha256 and bearer).",
             }),
           },
           { description: "create only: the inbound authentication scheme + secret." },
@@ -1964,7 +1973,7 @@ export function createPiTools(ref: ToolContextRef, opts?: PiToolsOptions): ToolD
               callId,
               { tool: "webhook", error: "verification and task required" },
               text(
-                "[error] webhook create requires `task` (what to do per event) and `verification` ({scheme, secret?}).",
+                "[error] webhook create requires `task` (what to do per event) and `verification` ({scheme, secret}).",
               ),
               true,
             );

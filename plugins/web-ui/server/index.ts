@@ -22,6 +22,7 @@ import {
 } from "../../chassis/src/http.ts";
 import { verifyPortalIdentity, PORTAL_IDENTITY_HEADER } from "../../chassis/src/portal-identity.ts";
 import { createBrandingCache, injectBranding } from "../../chassis/src/branding.ts";
+import { rememberThreadParticipants, threadAudience } from "./thread-audience.ts";
 import {
   CORE_API_URL as CORE,
   CORE_ORG_ID as ORG,
@@ -99,11 +100,10 @@ function rememberRun(runId: string, user: string, threadRef: string): void {
 
 const deliveryClients = new Map<string, Set<ServerResponse>>();
 
-function ownerOfWebThread(threadRef: string): string | null {
-  if (!threadRef.startsWith("web:")) return null;
-  const rest = threadRef.slice("web:".length);
-  const i = rest.indexOf(":");
-  return i > 0 ? rest.slice(0, i) : null;
+const CONTINUABLE_THREAD_PREFIXES = ["web:", "webhook:", "cron:"];
+
+function isContinuableThreadRef(threadRef: string): boolean {
+  return CONTINUABLE_THREAD_PREFIXES.some((prefix) => threadRef.startsWith(prefix));
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -347,8 +347,8 @@ async function drainWebDeliveries(): Promise<void> {
     for (const d of pending) {
       const target = d.destination?.target ?? "";
       const isRecovery = d.idempotencyKey.startsWith("run:");
-      const conns = !isRecovery ? deliveryClients.get(ownerOfWebThread(target) ?? "") : undefined;
-      if (conns && conns.size) {
+      const conns = isRecovery ? [] : threadAudience(target).flatMap((user) => [...(deliveryClients.get(user) ?? [])]);
+      if (conns.length) {
         for (const res of conns) sseEvent(res, "delivery", { threadRef: target });
       } else if (!isRecovery && now - (d.createdAt ?? 0) < WEB_DELIVERY_GIVEUP_MS) {
         continue;
@@ -374,13 +374,7 @@ interface SessionStateFrame {
 function forwardSessionState(frame: SessionStateFrame): void {
   const threadRef = typeof frame.threadRef === "string" ? frame.threadRef : "";
   if (!threadRef) return;
-  const targets = new Set<string>(
-    Array.isArray(frame.participants) ? frame.participants.filter((p): p is string => typeof p === "string") : [],
-  );
-  if (targets.size === 0) {
-    const owner = ownerOfWebThread(threadRef);
-    if (owner) targets.add(owner);
-  }
+  const targets = rememberThreadParticipants(threadRef, frame.participants);
   const { participants: _participants, ...visible } = frame;
   for (const user of targets) {
     for (const res of deliveryClients.get(user) ?? []) sseEvent(res, "session_state", visible);
@@ -562,6 +556,12 @@ interface CoreWebhook {
   lastFiredAt?: number;
   lastDeliveryId?: string;
   lastError?: string;
+}
+
+const WEBHOOK_SCHEMES = ["hmac-sha256", "bearer", "github", "slack", "stripe"];
+
+function isWebhookHomeScope(scopeId: string, user: string): boolean {
+  return scopeId === `personal:${user}` || scopeId.startsWith("group:");
 }
 
 async function setWebhookEnabledViaCore(
@@ -1784,7 +1784,7 @@ const apiRoutes: readonly WebRoute[] = [
       const threadRef =
         typeof record.request?.conversation?.threadRef === "string" ? record.request.conversation.threadRef : "";
       const actor = typeof record.request?.actor?.externalId === "string" ? record.request.actor.externalId : "";
-      if (!threadRef.startsWith("web:") || actor !== user || !record.request) {
+      if (!isContinuableThreadRef(threadRef) || actor !== user || !record.request) {
         return json(res, 404, { error: "not_found" });
       }
       if (!threadRef.startsWith(`web:${user}:`)) {
@@ -1839,7 +1839,7 @@ const apiRoutes: readonly WebRoute[] = [
               : {}),
           };
         }
-        if (typeof p.threadRef === "string" && p.threadRef.startsWith("web:")) threadRef = p.threadRef;
+        if (typeof p.threadRef === "string" && isContinuableThreadRef(p.threadRef)) threadRef = p.threadRef;
         if (typeof p.scopeId === "string" && p.scopeId) scope = p.scopeId;
         if (typeof p.channelName === "string" && p.channelName.trim()) channelName = p.channelName.trim().slice(0, 200);
         if (typeof p.model === "string" && p.model) model = p.model;
@@ -1939,7 +1939,7 @@ const apiRoutes: readonly WebRoute[] = [
     handle: async (c) => {
       const { res, url, user } = c;
       const threadRef = url.searchParams.get("threadRef") ?? "";
-      if (!threadRef.startsWith("web:")) return json(res, 404, { error: "not_found" });
+      if (!isContinuableThreadRef(threadRef)) return json(res, 404, { error: "not_found" });
       let queued: Array<{ runId: string; text: string }> = [];
       let durableRunId: string | null = null;
       const durable = await coreFetch("GET", `/v1/runs?threadRef=${encodeURIComponent(threadRef)}`);
@@ -2159,6 +2159,7 @@ const apiRoutes: readonly WebRoute[] = [
     handle: async (c) => {
       const { req, res, user } = c;
       let action: string;
+      let ownerScopeId = `personal:${user}`;
       let verification: { scheme: string; secret?: string } = { scheme: "hmac-sha256" };
       let filters: Array<{ path: string; in: string[] }> | undefined;
       try {
@@ -2167,8 +2168,18 @@ const apiRoutes: readonly WebRoute[] = [
           verification?: { scheme?: unknown; secret?: unknown };
           filters?: unknown;
           destination?: unknown;
+          scopeId?: unknown;
         };
         action = String(p.action ?? "").trim();
+        if (p.scopeId !== undefined) {
+          if (typeof p.scopeId !== "string" || !isWebhookHomeScope(p.scopeId, user)) {
+            return json(res, 400, {
+              error: "invalid_scope",
+              message: "a webhook lives in your personal context or in a shared context you belong to",
+            });
+          }
+          ownerScopeId = p.scopeId;
+        }
         if (p.verification !== undefined) {
           if (
             typeof p.verification !== "object" ||
@@ -2177,7 +2188,7 @@ const apiRoutes: readonly WebRoute[] = [
           ) {
             return json(res, 400, {
               error: "unsupported_verification",
-              message: "verification requires a scheme (HMAC-SHA256, GitHub, Slack, or Stripe)",
+              message: "verification requires a scheme (HMAC-SHA256, bearer token, GitHub, Slack, or Stripe)",
             });
           }
           verification = {
@@ -2221,17 +2232,17 @@ const apiRoutes: readonly WebRoute[] = [
           error: "action_required",
           message: "an action (the agent's instructions) is required",
         });
-      if (!["hmac-sha256", "github", "slack", "stripe"].includes(verification.scheme)) {
+      if (!WEBHOOK_SCHEMES.includes(verification.scheme)) {
         return json(res, 400, {
           error: "unsupported_verification",
-          message: "choose HMAC-SHA256, GitHub, Slack, or Stripe signature verification",
+          message: "choose HMAC-SHA256, bearer token, GitHub, Slack, or Stripe verification",
         });
       }
       if (!verification.secret) {
         verification = { ...verification, secret: randomBytes(32).toString("hex") };
       }
       const reqBody = JSON.stringify({
-        ownerScopeId: `personal:${user}`,
+        ownerScopeId,
         owner: user,
         createdBy: user,
         action,

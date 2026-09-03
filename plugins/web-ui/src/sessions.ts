@@ -34,6 +34,7 @@ import {
   currentEarlierCount,
   inheritedTranscript,
   isContinuable,
+  isWebNativeThread,
   entriesToMessages,
   regenerateTitle,
   sharedContextLabel,
@@ -307,7 +308,7 @@ export function slackLogo(size = 13): TemplateResult {
 
 function visibleSessions(): CoreSession[] {
   const sorted = [...sessionsState.list].sort((a, b) => activityOf(b) - activityOf(a));
-  return sessionsState.webOnly ? sorted.filter((s) => surfaceOf(s) === "web") : sorted;
+  return sessionsState.webOnly ? sorted.filter((s) => isWebNativeThread(s.threadRef)) : sorted;
 }
 
 export function renderList(): void {

@@ -216,3 +216,39 @@ test("public web creation rejects unauthenticated verification and malformed fil
   );
   assert.equal(destination.status, 400);
 });
+
+test("create can target a project the user belongs to; other people's scopes are refused", async () => {
+  await built.app.upsertDirectory([
+    { principalId: "lead", displayName: "Lead", type: "internal" },
+    { principalId: "analyst", displayName: "Analyst", type: "internal" },
+    { principalId: "stranger", displayName: "Stranger", type: "internal" },
+  ]);
+  const project = await built.app.createProject("lead", "Ingest target");
+  assert.ok(project);
+  assert.equal((await built.app.addProjectMember(project.id, "lead", "analyst")).status, "ok");
+
+  const create = (user: string, scopeId: string, scheme = "bearer") =>
+    fetch(
+      `${webBase}/api/webhooks`,
+      asUser(user, {
+        method: "POST",
+        body: JSON.stringify({ action: "file the data", scopeId, verification: { scheme } }),
+      }),
+    );
+
+  const asMember = await create("analyst", project.scopeId);
+  assert.equal(asMember.status, 200);
+  const created = (await asMember.json()) as {
+    webhook: { owner: string; ownerScopeId: string; verification: { scheme: string; secret?: string } };
+  };
+  assert.equal(created.webhook.owner, "analyst");
+  assert.equal(created.webhook.ownerScopeId, project.scopeId);
+  assert.equal(created.webhook.verification.scheme, "bearer");
+  assert.match(created.webhook.verification.secret ?? "", /^[0-9a-f]{64}$/);
+
+  assert.equal((await create("stranger", project.scopeId)).status, 403);
+  assert.equal((await create("stranger", "personal:lead")).status, 400);
+  assert.equal((await create("stranger", "channel:C-general")).status, 400);
+  assert.equal((await create("stranger", "personal:stranger")).status, 200);
+  assert.equal((await create("analyst", project.scopeId, "none")).status, 400);
+});

@@ -4,7 +4,7 @@ import type { CreateWebhookInput } from "../../webhooks/webhook-store.ts";
 import { errMessage } from "../../util/errors.ts";
 import { canAdministerWebhook } from "../control-service.ts";
 import { PayloadTooLargeError, readRawBody, sendJson } from "../http.ts";
-import { isObj } from "./shared.ts";
+import { isObj, triggerHomeRefusal } from "./shared.ts";
 import type { ApiCtx, BaseCtx, Route } from "./route.ts";
 
 function isCreateWebhook(b: unknown): b is CreateWebhookInput {
@@ -117,6 +117,8 @@ async function createWebhook(ctx: ApiCtx): Promise<void> {
   }
   if (!isCreateWebhook(body))
     return sendJson(res, 400, { error: "bad_request", message: "expected a CreateWebhookInput" });
+  const refusal = await triggerHomeRefusal(app, body);
+  if (refusal) return sendJson(res, refusal.status, { error: refusal.error, message: refusal.message });
   try {
     const webhook = await app.createWebhook(body);
     return sendJson(res, 200, { webhook, url: inboundUrl(deps.publicUrl, webhook.id) });

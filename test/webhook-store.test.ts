@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { MIN_BEARER_SECRET_LENGTH } from "../src/webhooks/verifiers.ts";
 import assert from "node:assert/strict";
 import { createWebhookStore } from "../src/webhooks/webhook-store.ts";
 import { createMemoryMap } from "../src/persistence/durable-map.ts";
@@ -124,4 +125,18 @@ test("re-creating a byte-identical disabled webhook re-enables it", async () => 
   assert.equal(second.id, first.id);
   assert.equal(second.enabled, true);
   assert.equal((await store.get(first.id))?.enabled, true);
+});
+
+test("a bearer secret must be long enough to act as a credential", async () => {
+  const store = createWebhookStore();
+  const input = { ownerScopeId: scopeId("personal", "U1"), owner: "U1", createdBy: "U1", action: "file it" } as const;
+  await assert.rejects(
+    store.create({ ...input, verification: { scheme: "bearer", secret: "x".repeat(MIN_BEARER_SECRET_LENGTH - 1) } }),
+    /at least/,
+  );
+  const ok = await store.create({
+    ...input,
+    verification: { scheme: "bearer", secret: "y".repeat(MIN_BEARER_SECRET_LENGTH) },
+  });
+  assert.equal(ok.verification.scheme, "bearer");
 });

@@ -4,7 +4,8 @@ import { api } from "./core-bridge";
 import { errMessage } from "../../chassis/src/errors";
 import { actionSnippet, closeFormMenus, copyText, icon, relTime, setFormMenuValue, toggleFormMenu } from "./ui";
 import { listBackLink, listPageTpl } from "./list-page";
-import { ensureContexts, scopeChip } from "./contexts";
+import { contextsState, ensureContexts, scopeChip, scopeTitle } from "./contexts";
+import type { CoreContext } from "./core-bridge";
 import { appState } from "./shell";
 import { deepLinkPath, isPlainLeftClick, UI_BASE } from "./deep-link";
 
@@ -24,13 +25,19 @@ export interface WebhookView {
   url: string;
 }
 
-type WebhookScheme = "hmac-sha256" | "github" | "slack" | "stripe";
+type WebhookScheme = "hmac-sha256" | "bearer" | "github" | "slack" | "stripe";
 
 const WEBHOOK_SCHEMES: Array<{ value: WebhookScheme; label: string; guidance: string }> = [
   {
     value: "hmac-sha256",
     label: "Generic HMAC-SHA256",
-    guidance: "Send the digest in X-Signature as hex or sha256=<hex>.",
+    guidance: "Sign the raw body with the secret and send the digest in X-Signature as hex or sha256=<hex>.",
+  },
+  {
+    value: "bearer",
+    label: "Bearer token",
+    guidance:
+      "Send the secret as Authorization: Bearer <secret>. No signing — the fit for scripts and services that can set a header. Send an Idempotency-Key header too, so a retried request doesn't fire twice.",
   },
   {
     value: "github",
@@ -307,6 +314,44 @@ async function setWebhookEnabled(id: string, enabled: boolean): Promise<void> {
   else drawWebhooksPage();
 }
 
+function trySnippet(scheme: string, url: string, secret: string): string | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(secret) || /['"\\\s]/.test(url)) return null;
+  const body = `'{"event":"hello","note":"first delivery"}'`;
+  if (scheme === "bearer") {
+    return `curl -X POST '${url}' -H 'Authorization: Bearer ${secret}' -H 'Idempotency-Key: first-delivery' -H 'Content-Type: application/json' -d ${body}`;
+  }
+  if (scheme === "hmac-sha256") {
+    return `body=${body}; sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac '${secret}' | sed 's/^.* //'); curl -X POST '${url}' -H "X-Signature: sha256=$sig" -H 'Content-Type: application/json' -d "$body"`;
+  }
+  return null;
+}
+
+function schemeGuidance(scheme: string): string {
+  return WEBHOOK_SCHEMES.find((candidate) => candidate.value === scheme)?.guidance ?? "";
+}
+
+function webhookHomeContexts(): CoreContext[] {
+  return contextsState.list.filter((c) => c.kind === "personal" || c.project);
+}
+
+function contextHint(scopeId: string): string {
+  const c = contextsState.list.find((candidate) => candidate.scopeId === scopeId);
+  if (c?.project) {
+    return `Each delivery starts a new thread in ${scopeTitle(scopeId)} that every member of the project can open and discuss.`;
+  }
+  return "Each delivery starts a new thread in your personal context. After creation, ask the agent to route notable results to a teammate or channel by name.";
+}
+
+function selectWebhookContext(e: Event, scopeId: string): void {
+  e.stopPropagation();
+  const control = (e.currentTarget as HTMLElement).closest(".context-control") as HTMLElement | null;
+  const form = control?.closest("form");
+  setFormMenuValue(control, scopeId, scopeTitle(scopeId));
+  const hint = form?.querySelector(".webhook-context-hint");
+  if (hint) hint.textContent = contextHint(scopeId);
+  closeFormMenus();
+}
+
 function randomHex(bytes: number): string {
   const a = new Uint8Array(bytes);
   crypto.getRandomValues(a);
@@ -314,10 +359,45 @@ function randomHex(bytes: number): string {
 }
 
 function webhookForm() {
+  const homes = webhookHomeContexts();
+  const initialScope =
+    homes.find((c) => c.scopeId === webhooksScope)?.scopeId ??
+    homes.find((c) => c.kind === "personal")?.scopeId ??
+    homes[0]?.scopeId ??
+    "";
   return html`
     <form class="resource-form" @submit=${onCreateWebhook}>
       ${listBackLink("Webhooks", drawWebhooksPage)}
       <h2>New webhook</h2>
+      <label>
+        Context <span class="hint">— where each delivery lands</span>
+        <div class="menu-control form-menu-control context-control">
+          <input type="hidden" name="scopeId" value=${initialScope} />
+          <button class="menu-button" type="button" aria-haspopup="menu" aria-expanded="false" @click=${toggleFormMenu}>
+            <span class="menu-label">${scopeTitle(initialScope)}</span>
+            ${icon(ChevronDown, 14)}
+          </button>
+          <div class="menu-popover" role="menu" hidden>
+            <div class="menu-title">Context</div>
+            ${homes.map(
+              (c) => html`
+                <button
+                  class="menu-option ${c.scopeId === initialScope ? "active" : ""}"
+                  type="button"
+                  data-value=${c.scopeId}
+                  role="menuitemradio"
+                  aria-checked=${c.scopeId === initialScope ? "true" : "false"}
+                  @click=${(e: Event) => selectWebhookContext(e, c.scopeId)}
+                >
+                  <span>${scopeTitle(c.scopeId)}</span>
+                  ${c.scopeId === initialScope ? icon(Check, 15) : nothing}
+                </button>
+              `,
+            )}
+          </div>
+        </div>
+        <span class="hint webhook-context-hint">${contextHint(initialScope)}</span>
+      </label>
       <label
         >Action <span class="hint">— what the agent should do for each event</span>
         <textarea
@@ -357,7 +437,7 @@ function webhookForm() {
         <span class="hint webhook-scheme-guidance">${WEBHOOK_SCHEMES[0]!.guidance}</span>
       </label>
       <label
-        >Signing secret <span class="hint">— leave blank to auto-generate</span>
+        >Secret <span class="hint">— leave blank to auto-generate</span>
         <div class="copyrow">
           <input type="text" name="secret" placeholder="auto-generated if blank" />
           <button type="button" class="btn" @click=${fillGeneratedSecret}>Generate</button>
@@ -367,10 +447,6 @@ function webhookForm() {
         >Filters <span class="hint">— optional; one per line as <code>path: value1, value2</code></span>
         <textarea name="filters" rows="2" placeholder="action: opened, reopened"></textarea>
       </label>
-      <p class="hint">
-        The event runs in your personal context. After creation, ask the agent to route notable results to a teammate or
-        channel by name.
-      </p>
       <div class="form-error"></div>
       <div class="actions"><button class="btn primary" type="submit">Create webhook</button></div>
     </form>
@@ -378,11 +454,13 @@ function webhookForm() {
 }
 
 function showNewWebhook(): void {
-  if (!appState.mainEl) return;
-  const host = document.createElement("div");
-  host.className = "resource-pane";
-  render(webhookForm(), host);
-  appState.mainEl.replaceChildren(host);
+  void ensureContexts().then(() => {
+    if (appState.currentView !== "webhooks" || !appState.mainEl) return;
+    const host = document.createElement("div");
+    host.className = "resource-pane";
+    render(webhookForm(), host);
+    appState.mainEl.replaceChildren(host);
+  });
 }
 
 function selectWebhookScheme(e: Event, scheme: WebhookScheme): void {
@@ -431,6 +509,7 @@ async function onCreateWebhook(e: Event): Promise<void> {
     (form.querySelector(`[name="${n}"]`) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null)?.value ??
     "";
   const action = field("action").trim();
+  const scopeId = field("scopeId");
   const scheme = field("scheme") || "hmac-sha256";
   const secret = field("secret").trim();
   let filters: Array<{ path: string; in: string[] }>;
@@ -447,6 +526,7 @@ async function onCreateWebhook(e: Event): Promise<void> {
   }
   const payload: Record<string, unknown> = {
     action,
+    ...(scopeId ? { scopeId } : {}),
     verification: { scheme, ...(secret ? { secret } : {}) },
   };
   if (filters.length) payload.filters = filters;
@@ -455,6 +535,8 @@ async function onCreateWebhook(e: Event): Promise<void> {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    if (webhooksScope && webhooksScope !== r.webhook.ownerScopeId) webhooksScope = null;
+    webhooksSearch = "";
     await refreshWebhooks();
     showWebhookCreated(r.webhook, r.url);
   } catch (err) {
@@ -467,6 +549,7 @@ function showWebhookCreated(w: WebhookView, url: string): void {
   const host = document.createElement("div");
   host.className = "resource-pane";
   const secret = w.verification.secret;
+  const snippet = secret && secret !== "***" ? trySnippet(w.verification.scheme, url, secret) : null;
   render(
     html`
       <div class="resource-detail">
@@ -481,12 +564,19 @@ function showWebhookCreated(w: WebhookView, url: string): void {
         ${
           secret && secret !== "***"
             ? html`<div class="field">
-                <label>Signing secret</label>
+                <label>Secret</label>
                 ${copyRow(secret)}
-                <div class="hint">
-                  Configure your sender to sign requests with this secret (scheme: ${w.verification.scheme}).
-                </div>
-              </div>`
+                <div class="hint">${schemeGuidance(w.verification.scheme)}</div>
+              </div>
+              ${
+                snippet
+                  ? html`<div class="field">
+                      <label>Try it</label>
+                      ${copyRow(snippet)}
+                      <div class="hint">Run this from a shell to send a first delivery.</div>
+                    </div>`
+                  : nothing
+              }`
             : html`<div class="field">
                 <div class="hint">No signing secret for scheme <code>${w.verification.scheme}</code>.</div>
               </div>`

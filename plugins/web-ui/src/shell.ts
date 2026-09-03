@@ -588,7 +588,7 @@ export function renderSidebarTop(): void {
               type="button"
               role="switch"
               aria-checked=${sessionsState.webOnly ? "true" : "false"}
-              title=${sessionsState.webOnly ? "Showing web chats only" : "Hide non-web conversations"}
+              title=${sessionsState.webOnly ? "Showing threads you can continue here" : "Hide Slack conversations"}
               @click=${toggleWebOnly}
             >
               <span>Web only</span><span class="mini-switch"><span class="mini-knob"></span></span>

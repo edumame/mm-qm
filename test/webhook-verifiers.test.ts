@@ -131,3 +131,26 @@ test("an unknown scheme has no verifier", () => {
   assert.equal(getVerifier("paypal"), null);
   assert.equal(getVerifier("none"), null);
 });
+
+test("bearer verifier accepts the secret as Authorization: Bearer, whatever the scheme's case", () => {
+  const v = getVerifier("bearer")!;
+  const rawBody = "payload";
+  assert.equal(v.verify({ secret: SECRET, headers: { authorization: `Bearer ${SECRET}` }, rawBody }), true);
+  assert.equal(v.verify({ secret: SECRET, headers: { authorization: `bearer ${SECRET}` }, rawBody }), true);
+  assert.equal(v.verify({ secret: SECRET, headers: { authorization: `Bearer ${SECRET}x` }, rawBody }), false);
+  assert.equal(v.verify({ secret: SECRET, headers: { authorization: `Basic ${SECRET}` }, rawBody }), false);
+  assert.equal(v.verify({ secret: SECRET, headers: { authorization: `Bearer ${SECRET} extra` }, rawBody }), false);
+  assert.equal(v.verify({ secret: SECRET, headers: { authorization: SECRET }, rawBody }), false);
+  assert.equal(v.verify({ secret: SECRET, headers: {}, rawBody }), false);
+  assert.equal(v.verify({ headers: { authorization: `Bearer ${SECRET}` }, rawBody }), false);
+});
+
+test("bearer dedups on the sender's Idempotency-Key and otherwise treats every delivery as new", () => {
+  const v = getVerifier("bearer")!;
+  assert.equal(
+    v.deliveryId({ headers: { "idempotency-key": "run-17" }, rawBody: "a" }),
+    v.deliveryId({ headers: { "idempotency-key": " run-17 " }, rawBody: "b" }),
+  );
+  assert.notEqual(v.deliveryId({ headers: {}, rawBody: "same" }), v.deliveryId({ headers: {}, rawBody: "same" }));
+  assert.notEqual(v.deliveryId({ headers: { "idempotency-key": "" }, rawBody: "x" }), "");
+});

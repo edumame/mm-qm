@@ -4,7 +4,7 @@ import { DEFAULT_CRON_TIMEZONE } from "../../cron/schedule.ts";
 import type { CapabilityClaims } from "../../auth/capability-token.ts";
 import { errMessage, swallow } from "../../util/errors.ts";
 import { sendJson } from "../http.ts";
-import { isObj } from "./shared.ts";
+import { isObj, triggerHomeRefusal } from "./shared.ts";
 import { decideRecipientConsent } from "../../triggers/trigger-store.ts";
 import { canAdministerCron } from "../control-service.ts";
 import { CRON_PATCH_NOTHING_TO_CHANGE } from "../control-service.ts";
@@ -258,6 +258,8 @@ async function createCron(ctx: ApiCtx): Promise<void> {
       message:
         "scopeShared crons must be created through an agent capability (it validates the scope is membership-controlled)",
     });
+  const refusal = await triggerHomeRefusal(app, body);
+  if (refusal) return sendJson(res, refusal.status, { error: refusal.error, message: refusal.message });
   try {
     const cron = await app.createCron(body);
     return sendJson(res, 200, { cron: withoutFireLog(cron) });

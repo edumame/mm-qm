@@ -138,3 +138,42 @@ test("a channel member can continue a teammate's shared web thread; outsiders an
   );
   assert.equal(outsider.status, 403);
 });
+
+test("a project member can continue the thread a webhook opened, and it stays that thread", async () => {
+  await built.app.upsertDirectory([
+    { principalId: "alice", displayName: "Alice", type: "internal" },
+    { principalId: "bob", displayName: "Bob", type: "internal" },
+    { principalId: "mallory", displayName: "Mallory", type: "internal" },
+  ]);
+  const project = await built.app.createProject("alice", "Ingest");
+  assert.ok(project);
+  assert.equal((await built.app.addProjectMember(project.id, "alice", "bob")).status, "ok");
+  const threadRef = "webhook:wh-ingest:delivery-1";
+
+  const bobTurn = await fetch(
+    `${webBase}/api/turn`,
+    asUser("bob", { method: "POST", body: JSON.stringify({ text: "ship it?", threadRef, scopeId: project.scopeId }) }),
+  );
+  assert.ok(bobTurn.status < 300, `bob's continuation should be accepted (got ${bobTurn.status})`);
+  const session = await waitForSession("alice", threadRef);
+  assert.equal(session.scopeId, project.scopeId);
+  assert.equal(
+    (await fetch(`${webBase}/api/runs/active?threadRef=${encodeURIComponent(threadRef)}`, asUser("bob"))).status,
+    200,
+  );
+  assert.equal(
+    (await fetch(`${webBase}/api/runs/active?threadRef=${encodeURIComponent("drop:d1")}`, asUser("bob"))).status,
+    404,
+  );
+
+  const personalClaim = await fetch(
+    `${webBase}/api/turn`,
+    asUser("bob", { method: "POST", body: JSON.stringify({ text: "sneak", threadRef }) }),
+  );
+  assert.equal(personalClaim.status, 403);
+  const outsider = await fetch(
+    `${webBase}/api/turn`,
+    asUser("mallory", { method: "POST", body: JSON.stringify({ text: "sneak", threadRef, scopeId: project.scopeId }) }),
+  );
+  assert.equal(outsider.status, 403);
+});

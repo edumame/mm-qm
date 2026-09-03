@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import type { Webhook } from "../types.ts";
 import { constantTimeEqual } from "../util/crypto.ts";
 
@@ -108,7 +108,23 @@ const hmacSha256: Verifier = {
   },
 };
 
-const VERIFIERS: Record<WebhookScheme, Verifier> = { github, slack, stripe, "hmac-sha256": hmacSha256 };
+const bearer: Verifier = {
+  verify({ secret, headers }) {
+    if (!secret) return false;
+    const raw = header(headers, "authorization");
+    if (!raw) return false;
+    const [scheme, ...rest] = raw.trim().split(/\s+/);
+    if (scheme?.toLowerCase() !== "bearer" || rest.length !== 1) return false;
+    return constantTimeEqual(rest[0]!, secret);
+  },
+  deliveryId({ headers }) {
+    return header(headers, "idempotency-key")?.trim() || randomUUID();
+  },
+};
+
+export const MIN_BEARER_SECRET_LENGTH = 16;
+
+const VERIFIERS: Record<WebhookScheme, Verifier> = { github, slack, stripe, "hmac-sha256": hmacSha256, bearer };
 
 export type WebhookScheme = Webhook["verification"]["scheme"];
 

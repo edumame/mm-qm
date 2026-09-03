@@ -10,7 +10,7 @@ import {
   type CreateTriggerInput,
 } from "../triggers/trigger-store.ts";
 import { hashId } from "../util/crypto.ts";
-import { getVerifier } from "./verifiers.ts";
+import { getVerifier, MIN_BEARER_SECRET_LENGTH } from "./verifiers.ts";
 
 export interface CreateWebhookInput extends CreateTriggerInput {
   action: string;
@@ -33,6 +33,9 @@ export function createWebhookStore(backing: DurableMap<Webhook> = createMemoryMa
       assertNoEscalation(input);
       if (!getVerifier(input.verification.scheme) || !input.verification.secret) {
         throw new Error("webhook verification requires a supported signed scheme and secret");
+      }
+      if (input.verification.scheme === "bearer" && input.verification.secret.length < MIN_BEARER_SECRET_LENGTH) {
+        throw new Error(`a bearer secret must be at least ${MIN_BEARER_SECRET_LENGTH} characters`);
       }
       if (
         input.filters?.some(

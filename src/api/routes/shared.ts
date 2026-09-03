@@ -1,5 +1,6 @@
 import { orgId as configOrgId, orgScope as configOrgScope } from "../../config.ts";
-import type { Principal } from "../../types.ts";
+import type { Principal, ScopeId } from "../../types.ts";
+import type { App } from "../app.ts";
 import type { AuditEvent } from "../../audit/audit-log.ts";
 import { adminStatusFromGrants } from "../../admin/admin-service.ts";
 import type { ServerDeps } from "../deps.ts";
@@ -9,6 +10,18 @@ import { headerValue, sendJson } from "../http.ts";
 export const orgScope = (_deps?: unknown): string => configOrgScope();
 
 export const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+
+export async function triggerHomeRefusal(
+  app: Pick<App, "membershipControlsScope" | "managesScope">,
+  input: { ownerScopeId: ScopeId; owner: string; ownerConsentedAt?: number },
+): Promise<{ status: number; error: string; message: string } | null> {
+  if (input.ownerConsentedAt !== undefined) {
+    return { status: 400, error: "bad_request", message: "ownerConsentedAt is not accepted on this route" };
+  }
+  if (!(await app.membershipControlsScope(input.ownerScopeId))) return null;
+  if (await app.managesScope(input.owner, input.ownerScopeId)) return null;
+  return { status: 403, error: "forbidden", message: "the owner is not a member of that context" };
+}
 
 export function audit(deps: ServerDeps, e: Omit<AuditEvent, "at">): void {
   deps.auditLog?.record({ at: Date.now(), ...e });

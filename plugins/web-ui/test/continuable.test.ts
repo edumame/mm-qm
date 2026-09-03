@@ -13,6 +13,15 @@ test("a teammate's web session is continuable only when it lives in a shared sco
   assert.equal(isContinuable({ threadRef: "web:alice:t1", scopeId: "personal:alice" }, "bob"), false);
 });
 
+test("threads a webhook or cron opened in a shared context are continuable by its members", () => {
+  assert.equal(isContinuable({ threadRef: "webhook:wh1:d1", scopeId: "group:web-project-p1" }, "bob"), true);
+  assert.equal(isContinuable({ threadRef: "cron:c1:fire1", scopeId: "group:web-project-p1" }, "bob"), true);
+  assert.equal(isContinuable({ threadRef: "webhook:wh1:d1", scopeId: "personal:alice" }, "alice"), false);
+  assert.equal(isContinuable({ threadRef: "drop:d1", scopeId: "group:web-project-p1" }, "bob"), false);
+  assert.equal(isContinuable({ threadRef: "ask:a1:pending", scopeId: "group:web-project-p1" }, "bob"), false);
+  assert.equal(isContinuable({ threadRef: "monitor:m1", scopeId: "channel:C1" }, "bob"), false);
+});
+
 test("Slack-anchored sessions are never continuable here", () => {
   assert.equal(isContinuable({ threadRef: "dm:D1", scopeId: "personal:alice" }, "alice"), false);
   assert.equal(isContinuable({ threadRef: "ch:C1:1699999999.000100", scopeId: "channel:C1" }, "alice"), false);

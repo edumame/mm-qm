@@ -370,8 +370,14 @@ export interface QueuedRun {
   text: string;
 }
 
+const CONTINUABLE_THREAD_PREFIXES = ["web:", "webhook:", "cron:"];
+
+export function isWebNativeThread(threadRef: string): boolean {
+  return CONTINUABLE_THREAD_PREFIXES.some((prefix) => threadRef.startsWith(prefix));
+}
+
 export function isContinuable(s: Pick<CoreSession, "threadRef" | "scopeId">, user: string): boolean {
-  if (!s.threadRef.startsWith("web:")) return false;
+  if (!isWebNativeThread(s.threadRef)) return false;
   return s.threadRef.startsWith(`web:${user}:`) || s.scopeId.startsWith("channel:") || s.scopeId.startsWith("group:");
 }
 

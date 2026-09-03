@@ -97,13 +97,25 @@ and `CORE_SIGNING_SECRET` (same value as the core when source-auth is enabled).
   via `GET /v1/sessions`, so you recognize _where_ a conversation happened at a glance.
 - **Webhook management** (the **Webhooks** sidebar view) — register, list, and disable your
   own incoming webhooks (spec §7). Each registration is created with `owner = createdBy = you`
-  in your `personal:<you>` scope (identity comes from the cookie, **never** the request body —
-  the same trust model as `/api/turn`). The server proxies three routes:
+  (identity comes from the cookie, **never** the request body — the same trust model as
+  `/api/turn`) in the context you pick: your `personal:<you>` scope, or a **project** you belong
+  to. A project webhook is how an outside service writes data into a project — every delivery
+  starts a new thread in that project that all of its members can open, so the team evaluates
+  the data together in one place. The server accepts `personal:<you>` or any `group:` scope and
+  the core refuses (403) a shared scope the caller is not a member of. Verification is one of
+  `hmac-sha256` (sender signs the body), `bearer` (sender sends the secret as
+  `Authorization: Bearer <secret>` — a plain API key for scripts and no-code tools), `github`,
+  `slack`, or `stripe`. The server proxies three routes:
   - `POST /api/webhooks` → core `POST /v1/webhooks`; relays core's response — the webhook, the
     **absolute** public ingress URL (core builds it from its public base — the portal in prod),
-    and the signing secret **once** (auto-generated if you leave it blank; never shown again).
-  - `GET /api/webhooks` → core `GET /v1/webhooks`, then **filtered to `owner === you`** (core's
-    source-auth list is operator-wide; secrets are already elided by the core).
+    and the secret **once** (auto-generated if you leave it blank; never shown again), plus a
+    ready-to-paste `curl` for the two self-serve schemes.
+
+    ![New webhook form with the project picker and bearer scheme](../../docs/screenshots/project-webhook-form.png)
+    ![The thread a delivery opened in the project](../../docs/screenshots/project-webhook-thread.png)
+  - `GET /api/webhooks` → core `GET /v1/webhooks?viewer=you`; core returns the webhooks you can
+    administer — your own, plus every webhook homed in a project or private channel you belong
+    to (secrets are already elided by the core).
   - `POST /api/webhooks/:id/disable` → ownership is **verified here first** (core's operator
     disable has no ownership check), mirroring the run-ownership gate, then proxied.
     The inbound ingress (`POST /v1/webhooks/incoming/:id`) is served by the **core** receiver,

@@ -24,3 +24,11 @@ test("welcome screen renders the Floodgate card", () => {
   const css = readFileSync(new URL("../src/shell.css", import.meta.url), "utf8");
   assert.match(css, /\.floodgate-card\b/, "shell.css must style .floodgate-card");
 });
+
+test("the Floodgate card shows on every empty chat, not only for brand-new users", () => {
+  const chat = readFileSync(new URL("../src/chat.ts", import.meta.url), "utf8");
+  const draw = chat.match(/function drawActiveChat\([^]*?\n  \}\n/)?.[0] ?? "";
+  assert.ok(draw.length > 0, "drawActiveChat found");
+  const emptyBranch = draw.slice(draw.indexOf("} else if (isNewUser)"), draw.indexOf("const tier"));
+  assert.match(emptyBranch, /\} else \{[^]*floodgateCard\(/, "returning users with an empty chat must also get the card");
+});

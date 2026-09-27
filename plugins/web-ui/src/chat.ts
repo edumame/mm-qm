@@ -1054,6 +1054,10 @@ export function createChatSurface(
       );
     } else if (isNewUser) {
       messageContent = welcomeGreeting();
+    } else {
+      messageContent = html`<article class="message-row assistant-row welcome-greeting">
+        <div class="assistant-body">${floodgateCard(pickFloodgatePrompt)}</div>
+      </article>`;
     }
     const tier = ctx.density();
     const glanceTier = tier === "card" || tier === "strip" ? tier : null;

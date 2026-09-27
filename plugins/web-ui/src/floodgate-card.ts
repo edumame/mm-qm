@@ -12,7 +12,7 @@ export const FLOODGATE_PROMPTS: readonly FloodgatePrompt[] = [
   {
     label: "Should I send this article to them?",
     prompt:
-      "Use the floodgate skill (send) to decide whether I should send this article to this person. Article: <title, one-line summary, or URL>. Person: <name — pull what they work on and care about from memory>. My reason: <why I want to send it>. Report SEND / HOLD / DON'T SEND with each probability, and if SEND, draft a one-line note saying why it's relevant to them.",
+      "Use the floodgate skill (send) to decide whether I should send this article to Aditya. First run the floodgate status check. Article: SemIf: run Jev-style typed decisions fully in the browser with WebGPU, no server (https://github.com/TheoLeeCJ/SemIf-OpenJev). Person: Aditya, ML engineer on my hackathon team, building the Floodgate Chrome extension, which currently needs my laptop as a server. My reason: it could let the extension run the model without my laptop. Report SEND / HOLD / DON'T SEND with each probability and the model used, and if SEND, draft a one-line note to Aditya saying why it's relevant to him.",
   },
   {
     label: "Check a draft before I send it",

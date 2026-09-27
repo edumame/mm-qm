@@ -34,3 +34,10 @@ test("the Floodgate card shows on every empty chat, not only for brand-new users
   const emptyBranch = draw.slice(draw.indexOf("} else if (isNewUser)"), draw.indexOf("const tier"));
   assert.match(emptyBranch, /\} else \{[^]*floodgateCard\(/, "returning users with an empty chat must also get the card");
 });
+
+test("the first prompt is a real, ready-to-send example (no <placeholders>)", () => {
+  const p = FLOODGATE_PROMPTS[0].prompt;
+  assert.doesNotMatch(p, /[<>]/, "no <placeholder> slots in the primary example");
+  assert.match(p, /https?:\/\//, "names an actual article URL");
+  assert.match(p, /status/i, "asks the agent to prove it's using the right model first");
+});

@@ -13,6 +13,8 @@ test("offers one-click Floodgate prompts that route through the floodgate skill"
     assert.match(p.prompt, /floodgate/i, "prompt must ask the agent to use the floodgate skill");
     assert.doesNotMatch(p.prompt, /Bearer|token|ngrok/i, "no secrets or endpoints in the browser bundle");
   }
+  assert.match(FLOODGATE_PROMPTS[0].label, /send this article/i, "the first, primary action is: should I send this article to them?");
+  assert.match(FLOODGATE_PROMPTS[0].prompt, /floodgate skill \(send\)/i);
   const labels = FLOODGATE_PROMPTS.map((p) => p.label.toLowerCase()).join(" | ");
   assert.match(labels, /draft/, "check a draft (say the right thing)");
   assert.match(labels, /on task/, "is this page on task");

@@ -10,6 +10,11 @@ export interface FloodgatePrompt {
 
 export const FLOODGATE_PROMPTS: readonly FloodgatePrompt[] = [
   {
+    label: "Should I send this article to them?",
+    prompt:
+      "Use the floodgate skill (send) to decide whether I should send this article to this person. Article: <title, one-line summary, or URL>. Person: <name — pull what they work on and care about from memory>. My reason: <why I want to send it>. Report SEND / HOLD / DON'T SEND with each probability, and if SEND, draft a one-line note saying why it's relevant to them.",
+  },
+  {
     label: "Check a draft before I send it",
     prompt:
       "Use the floodgate skill to check whether this draft says the right thing for my goal. Goal: <what I want the message to achieve>. Draft: \"<paste the message>\". Ask one yes/no question per concern (on goal? unsupported claims? warm tone?), report each probability, then suggest a better version if needed.",
@@ -33,7 +38,7 @@ export function floodgateCard(onPick: (prompt: string) => void): TemplateResult 
         <span class="floodgate-card-mark" aria-hidden="true">⛩</span>
         <div>
           <div class="floodgate-card-title">Floodgate</div>
-          <div class="floodgate-card-sub">Your own judgment model, trained on River. Calibrated yes/no answers, not prose.</div>
+          <div class="floodgate-card-sub">Should I send this article to them? Your own judgment model, trained on River, answers with calibrated probabilities.</div>
         </div>
       </div>
       <div class="floodgate-card-actions">

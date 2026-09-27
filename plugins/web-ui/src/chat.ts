@@ -6,6 +6,7 @@ import "./marked-dedupe";
 import "@mariozechner/mini-lit/dist/MarkdownBlock.js";
 import "@mariozechner/mini-lit/dist/CodeBlock.js";
 import { html, nothing, render, type TemplateResult } from "lit";
+import { floodgateCard } from "./floodgate-card";
 import {
   Activity,
   Ban,
@@ -916,9 +917,17 @@ export function createChatSurface(
                 "Want to get set up? Tell me your name and what you're working on, and I'll take it from there — or just ask me anything to dive straight in.",
             )}
           </div>
+          ${floodgateCard(pickFloodgatePrompt)}
         </div>
       </article>
     `;
+  }
+
+  function pickFloodgatePrompt(prompt: string): void {
+    ctx.composer.state.draft = prompt;
+    if (chatState.agent) drawActiveChat(chatState.agent);
+    ctx.composer.resizeComposer();
+    ctx.composer.focusComposerEnd();
   }
 
   function setTranscriptWindow(anchorSeq: number | null, earlierCount: number, hasEarlier = earlierCount > 0): void {
